@@ -122,58 +122,72 @@ std::string JavaCodeGenerator::generateVarDecl(const VarDecl* node) const {
     oss << typeStr << " " << node->name;
     symbolTable[node->name] = node->type.get();
 
-    // --- Add imports for generic interfaces ---
-    if (typeStr.find("List") == 0)        requiredImports.insert("import java.util.List;");
-    if (typeStr.find("Map") == 0)         requiredImports.insert("import java.util.Map;");
-    if (typeStr.find("Set") == 0)         requiredImports.insert("import java.util.Set;");
-
-    // --- Add imports for concrete container types ---
-    if (typeStr.find("ArrayList") == 0)       requiredImports.insert("import java.util.ArrayList;");
-    if (typeStr.find("HashMap") == 0)         requiredImports.insert("import java.util.HashMap;");
-    if (typeStr.find("HashSet") == 0)         requiredImports.insert("import java.util.HashSet;");
-    if (typeStr.find("LinkedList") == 0)      requiredImports.insert("import java.util.LinkedList;");
-    if (typeStr.find("ArrayDeque") == 0)      requiredImports.insert("import java.util.ArrayDeque;");
-    if (typeStr.find("Stack") == 0)           requiredImports.insert("import java.util.Stack;");
-    if (typeStr.find("PriorityQueue") == 0)   requiredImports.insert("import java.util.PriorityQueue;");
-    if (typeStr.find("BitSet") == 0)          requiredImports.insert("import java.util.BitSet;");
-    if (typeStr.find("Optional") == 0)        requiredImports.insert("import java.util.Optional;");
-    if (typeStr.find("AbstractMap") == 0)     requiredImports.insert("import java.util.AbstractMap;");
-
-    // --- For Queue, import both interface and LinkedList if used as implementation ---
-    if (typeStr.find("Queue") == 0)           requiredImports.insert("import java.util.Queue;");
-    // If you instantiate as LinkedList for Queue:
-    if (typeStr.find("Queue") == 0 || typeStr.find("LinkedList") == 0)
-        requiredImports.insert("import java.util.LinkedList;");
-
-    // --- Handle initializer list for containers ---
-    static const std::vector<std::pair<std::string, std::string>> containerTypes = {
-        {"ArrayList", "ArrayList"}, {"HashMap", "HashMap"}, {"HashSet", "HashSet"},
-        {"LinkedList", "LinkedList"}, {"ArrayDeque", "ArrayDeque"}, {"Stack", "Stack"},
-        {"PriorityQueue", "PriorityQueue"}, {"BitSet", "BitSet"}, {"Optional", "Optional"},
-        {"Queue", "LinkedList"}
-    };
-
-    std::string instType;
-    for (const auto& pair : containerTypes) {
-        if (typeStr.find(pair.first) == 0) {
-            instType = pair.second;
-            break;
+    // --- User-defined template class instantiation ---
+    if (node->type && node->type->type == ASTNodeType::TEMPLATE_TYPE) {
+        const TemplateType* tt = static_cast<const TemplateType*>(node->type.get());
+        if (userDefinedTemplates.count(tt->baseTypeName)) {
+            oss << " = new " << tt->baseTypeName << "<";
+            for (size_t i = 0; i < tt->typeArgs.size(); ++i) {
+                oss << mapTypeNodeToJava(tt->typeArgs[i].get(), true);
+                if (i + 1 < tt->typeArgs.size()) oss << ", ";
+            }
+            oss << ">()";
         }
     }
+    // --- Existing STL container/initializer logic ---
+    else {
+        // --- Add imports for generic interfaces ---
+        if (typeStr.find("List") == 0)        requiredImports.insert("import java.util.List;");
+        if (typeStr.find("Map") == 0)         requiredImports.insert("import java.util.Map;");
+        if (typeStr.find("Set") == 0)         requiredImports.insert("import java.util.Set;");
 
-    if (node->initializer && node->initializer->type == ASTNodeType::INITIALIZER_LIST_EXPR && !instType.empty()) {
-        requiredImports.insert("import java.util.Arrays;");
-        const InitializerListExpr* initList = static_cast<const InitializerListExpr*>(node->initializer.get());
-        oss << " = new " << instType << "<>(Arrays.asList(";
-        for (size_t i = 0; i < initList->elements.size(); ++i) {
-            oss << generate(initList->elements[i].get());
-            if (i + 1 < initList->elements.size()) oss << ", ";
+        // --- Add imports for concrete container types ---
+        if (typeStr.find("ArrayList") == 0)       requiredImports.insert("import java.util.ArrayList;");
+        if (typeStr.find("HashMap") == 0)         requiredImports.insert("import java.util.HashMap;");
+        if (typeStr.find("HashSet") == 0)         requiredImports.insert("import java.util.HashSet;");
+        if (typeStr.find("LinkedList") == 0)      requiredImports.insert("import java.util.LinkedList;");
+        if (typeStr.find("ArrayDeque") == 0)      requiredImports.insert("import java.util.ArrayDeque;");
+        if (typeStr.find("Stack") == 0)           requiredImports.insert("import java.util.Stack;");
+        if (typeStr.find("PriorityQueue") == 0)   requiredImports.insert("import java.util.PriorityQueue;");
+        if (typeStr.find("BitSet") == 0)          requiredImports.insert("import java.util.BitSet;");
+        if (typeStr.find("Optional") == 0)        requiredImports.insert("import java.util.Optional;");
+        if (typeStr.find("AbstractMap") == 0)     requiredImports.insert("import java.util.AbstractMap;");
+
+        // --- For Queue, import both interface and LinkedList if used as implementation ---
+        if (typeStr.find("Queue") == 0)           requiredImports.insert("import java.util.Queue;");
+        if (typeStr.find("Queue") == 0 || typeStr.find("LinkedList") == 0)
+            requiredImports.insert("import java.util.LinkedList;");
+
+        // --- Handle initializer list for containers ---
+        static const std::vector<std::pair<std::string, std::string>> containerTypes = {
+            {"ArrayList", "ArrayList"}, {"HashMap", "HashMap"}, {"HashSet", "HashSet"},
+            {"LinkedList", "LinkedList"}, {"ArrayDeque", "ArrayDeque"}, {"Stack", "Stack"},
+            {"PriorityQueue", "PriorityQueue"}, {"BitSet", "BitSet"}, {"Optional", "Optional"},
+            {"Queue", "LinkedList"}
+        };
+
+        std::string instType;
+        for (const auto& pair : containerTypes) {
+            if (typeStr.find(pair.first) == 0) {
+                instType = pair.second;
+                break;
+            }
         }
-        oss << "))";
-    } else if (!node->initializer && !instType.empty()) {
-        oss << " = new " << instType << "<>()";
-    } else if (node->initializer) {
-        oss << " = " << generate(node->initializer.get());
+
+        if (node->initializer && node->initializer->type == ASTNodeType::INITIALIZER_LIST_EXPR && !instType.empty()) {
+            requiredImports.insert("import java.util.Arrays;");
+            const InitializerListExpr* initList = static_cast<const InitializerListExpr*>(node->initializer.get());
+            oss << " = new " << instType << "<>(Arrays.asList(";
+            for (size_t i = 0; i < initList->elements.size(); ++i) {
+                oss << generate(initList->elements[i].get());
+                if (i + 1 < initList->elements.size()) oss << ", ";
+            }
+            oss << "))";
+        } else if (!node->initializer && !instType.empty()) {
+            oss << " = new " << instType << "<>()";
+        } else if (node->initializer) {
+            oss << " = " << generate(node->initializer.get());
+        }
     }
 
     oss << ";";
